@@ -1,0 +1,596 @@
+#fecha porta = 51203 milissegundos
+#encoding: utf-8
+#!/usr/bin/env python3.7
+#import smbus
+# ~ canal dimer 1 = a
+# ~ canal dimer 2 = b
+# ~ canal dimer 3 = g
+# ~ canal dimer 4 = d
+# ~ canal dimer 5 = e
+# ~ canal dimer 6 = f
+# ~ canal dimer 7 = h
+# ~ canal dimer 8 = g
+# ~ canal dimer 9 = nc
+# ~ canal dimer 10 = nc
+from instance.config_json import Config
+from fnmatch import fnmatch
+from operations.mqtt import MosquittoServer, Mosquitto
+import linecache
+import time
+import threading
+import signal
+import serial
+import serial.tools.list_ports
+global serial_data
+import json
+from omxplayer.player import OMXPlayer
+#from operations.telegram import Bot
+from pathlib import Path
+from time import sleep
+import logging
+import subprocess
+import datetime
+import os
+import sys
+import termios, tty
+volume = 1
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+inicio_chuva_petalas = 218
+acende_scenario = 365
+inicio_pulsa_cruz = 339
+fim_pulsa_cruz = 352
+inicio_sequencia = inicio_chuva_petalas - 5
+inicio_fumaca = inicio_chuva_petalas - 5 - 5
+apaga_cruz = fim_pulsa_cruz + 8
+conf = Config()
+config = conf.json_config['CONFIG']
+entrega = False
+cerimonia_normal = False
+
+def update_code():
+	pattern = "*.py"
+	lista_de_arquivos = []
+	for path, subdirs, files in os.walk(ROOT_DIR):
+		for name in files:
+			if fnmatch(name, pattern):
+				if not ".git" in path:
+					full_path = os.path.join(path, name)
+					cmd_turned = os.popen("date -r " + full_path).read().rstrip()
+					lista_de_arquivos.append ([full_path, cmd_turned])
+	while True:
+		leitura_atual = []
+		for path, subdirs, files in os.walk(ROOT_DIR):
+			for name in files:
+				if fnmatch(name, pattern):
+					if not ".git" in path:
+						full_path = os.path.join(path, name)
+						cmd_turned = os.popen("date -r " + full_path).read().rstrip()
+						leitura_atual.append ([full_path, cmd_turned])
+		if lista_de_arquivos != leitura_atual:
+			print("reiniciando app")
+			os.execv(sys.executable, ['python3'] + sys.argv)
+		time.sleep(5)
+
+thread = threading.Thread(target=update_code)
+thread.start()
+
+def printException():
+	exc_type, exc_obj, tb = sys.exc_info()
+	f = tb.tb_frame
+	lineno = tb.tb_lineno
+	filename = f.f_code.co_filename
+	linecache.checkcache(filename)
+	line = linecache.getline(filename, lineno, f.f_globals)
+	print ('EXCEPTION IN ({}, LINE {} "{}"): {}'.format(filename, lineno, line.strip(), exc_obj))
+tempo = time.time()
+
+URL = ""
+if config["ORIGEM_VIDEO"] == "VIDEO_LOCAL":
+    URL = os.path.join(ROOT_DIR, "videos", config["VIDEO_LOCAL"]['URL'])
+
+elif config["ORIGEM_VIDEO"] == "VIDEO_EXTERNO":
+    URL = os.path.join(ROOT_DIR, "media_shared", "video", config["VIDEO_EXTERNO"]['URL'])
+player_log = logging.getLogger("Player 1")
+player = OMXPlayer(URL, args=[  '-o', 'local', '--no-osd','-b'], dbus_name='org.mpris.MediaPlayer2.omxplayer1')
+player.set_aspect_mode('stretch')
+
+while player.playback_status() != "Paused":
+	print(player.position())
+	player.pause()
+player.play()
+tempo = time.time()
+print("video pausado")
+player.set_volume(volume)
+def change_video():
+	'''ATRIBUI A CERIMONIA AO BOTAO PRESSIONADO NO PAINEL'''
+	global videoDuration
+	try:
+		URL = ""
+		if config["ORIGEM_VIDEO"] == "VIDEO_LOCAL":
+			URL = os.path.join(ROOT_DIR, "videos", config["VIDEO_LOCAL"]['URL'])
+
+		elif config["ORIGEM_VIDEO"] == "VIDEO_EXTERNO":
+			URL = os.path.join(ROOT_DIR, "media_shared", "video", config["VIDEO_EXTERNO"]['URL'])
+
+		player.load(URL,  pause=False)
+		player.set_volume(volume)
+		time.sleep(1)
+		
+		player.pause()
+		player.set_aspect_mode('stretch')
+	except Exception as ex:
+		printException()
+
+	videoDuration = player.duration()
+	#~ while player.playback_status() != "Paused":
+		#~ player.pause()
+		#~ time.sleep(.01)
+	time.sleep(.1)
+	#~ tempo = time.time()
+	player.set_volume(volume)
+	print("Volume " + str(player.volume()))
+	print("O vídeo {} tem {} segundos de duração ".format(config['VIDEO_1']['URL'], player.duration()))
+
+def process_serial(dados):
+	global cerimonia_normal
+	global entrega
+	if dados != "":
+		print("Dados serial " +str(dados))
+		if dados == 'button_counter = 2':
+			if config["CEMITERIO"] == "VIDA":
+				serial_nano.write(b'(0,0,0,0,0,0)\n')
+			cmd = {"mute":"mute"}
+			cmd = json.dumps(cmd)
+			mqttLocal.mqttc.publish(config["TOPICO_INT_IHM"], cmd, qos=2)			
+			pass
+	
+		if dados == 'GUARDAMESA':
+			# ~ print("player position", player.position())
+			pass
+	
+		if dados == 'ABRINDO A PORTA':
+			# ~ print("Player position abre", player.position())
+			pass
+	
+		if dados == 'FECHA PORTA':
+			# ~ print("Player position inicio fechamento", player.position())
+			pass
+	
+		if dados == 'PORTA FECHADA':
+			# ~ print("Player position final fechamento", player.position())
+			pass
+
+		if dados == 'TIME':
+			print(tempo - time.time())
+			tempo = time.time()
+			pass
+		if dados == 'APAGA_CABINE':
+			#~ J2=Job('change', "SANCA_CABINE", ' -C gradual 90 "(0,0,0)"')
+			#~ J2.start()
+
+			pass
+		if dados != 'ONLINE':
+			pass
+
+		# ~ if dados == 'button_counter = 2':
+			# ~ serial_mega.write(b'GPIO,42,1\n')		
+
+		if dados == 'ESTEIRA DESLIGADA':
+			serial_mega.write(b'LED_ESTEIRA,0\n')
+
+		if dados == 'CERIMONIA_COMPLETA':
+			# ~ try:
+				# ~ telegram_bot.envia_telegram_single("334240998", "CERIMONIA INICIADA")
+			# ~ except:
+				# ~ print("ERRO TELEGRAM")
+			serial_mega.write(b'INICIO_CERIMONIA\n')				
+			reset_timers()		
+			serial_mega.write(b'COMPLETA\n')
+			print(config["CEMITERIO"])
+			if config["CEMITERIO"] == "KRAUSE":#baixar cortinas
+				serial_data = "CORT_all_0\n"
+				serial_mega.write(serial_data.encode("utf-8"))
+				time.sleep(26)
+			if config["CEMITERIO"] == "VIDA":#desligar os balizadores da rampa
+				serial_mega.write(b'GPIO,42,0\n')
+			serial_mega.write(b'<0,0,0,0,0,0,0,0,0,0>\n')
+			time.sleep(.02)
+			if config["CEMITERIO"] == "VIDA":
+				serial_nano.write(b'(0,0,0,0,0,0)\n')
+			serial_mega.write(b'(0,0,0,0,0,0,0,0,0)\n')
+
+			time.sleep(.1)
+
+			cmd = {"display_off":"display_off"}
+			cmd = json.dumps(cmd)
+			mqttLocal.mqttc.publish(config["TOPICO_INT_IHM"], cmd, qos=2)
+
+			player.set_position(1)
+			serial_mega.write(b'LED_URNA,255\n')
+			player.play()
+			time.sleep(1)			
+			cerimonia_normal = True
+			entrega = False	
+
+		if dados == 'CERIMONIA_ENTREGA':
+			serial_mega.write(b'INICIO_CERIMONIA\n')			
+			reset_timers()
+			if config["CEMITERIO"] == "VIDA":#desligar os balizadores da rampa
+				serial_mega.write(b'GPIO,42,0\n')
+			# ~ try:
+				# ~ telegram_bot.envia_telegram_single("334240998", "CERIMONIA INICIADA")
+			# ~ except:
+				# ~ print("ERRO TELEGRAM")
+			serial_mega.write(b'<0,0,0,0,0,0,0,0,0,0>\n')
+			time.sleep(.02)
+			serial_mega.write(b'(0,0,0,0,0,0,0,0,0)\n')
+			if config["CEMITERIO"] == "VIDA":
+				serial_nano.write(b'(0,0,0,0,0,0)\n')
+			cmd = {"display_off":"display_off"}
+			cmd = json.dumps(cmd)
+			mqttLocal.mqttc.publish(config["TOPICO_INT_IHM"], cmd, qos=2)
+			player.set_position(0)
+			player.play()
+			time.sleep(1)
+			cerimonia_normal = False
+			entrega = True			
+
+
+class Liga_manual (threading.Thread):
+##  '''VERIFICAR SE A THREAD RODA SEM O PCF8574 INSTALADO'''
+	def __init__(self):
+		threading.Thread.__init__(self)
+		# The shutdown_flag is a threading.Event object that
+		# indicates whether the thread should be terminated.
+		self.shutdown_flag = threading.Event()
+
+	def run(self):
+
+		if config["CEMITERIO"] == "VIDA":
+			
+			serial_nano.write(b'(255,255,255,255,255,255)')
+			time.sleep(2)
+			serial_mega.write(b'DIMER,1,100\n')
+			time.sleep(2)
+			serial_mega.write(b'DIMER,2,100\n')
+			time.sleep(2)		
+			serial_mega.write(b'DIMER,3,100\n')
+			time.sleep(2)
+			serial_mega.write(b'DIMER,4,100\n')
+			time.sleep(2)
+			serial_mega.write(b'DIMER,5,100\n')
+			time.sleep(2)
+			serial_mega.write(b'DIMER,6,100\n')
+		if config["CEMITERIO"] == "KRAUSE":
+			time.sleep(5)
+			serial_mega.write(b'R_DIMER,8,100\n')
+			time.sleep(2)		
+			serial_mega.write(b'R_DIMER,6,100\n')
+			time.sleep(2)
+			serial_mega.write(b'R_DIMER,5,100\n')
+			time.sleep(2)
+			serial_mega.write(b'R_DIMER,4,100\n')
+			time.sleep(2)
+			serial_mega.write(b'R_DIMER,2,100\n')
+			time.sleep(2)
+
+			serial_mega.write(b'R_DIMER,1,100\n')
+			serial_mega.write(b'R_DIMER,7,100\n')
+			serial_mega.write(b'R_DIMER,3,100\n')
+			time.sleep(2)
+
+
+class readSerial(threading.Thread):
+##  '''VERIFICAR SE A THREAD RODA SEM O PCF8574 INSTALADO'''
+	def __init__(self):
+		threading.Thread.__init__(self)
+		# The shutdown_flag is a threading.Event object that
+		# indicates whether the thread should be terminated.
+		self.shutdown_flag = threading.Event()
+
+	def run(self):
+			#liga_todos()
+			while not self.shutdown_flag.is_set():
+				try:
+					
+					global serial_mega
+					if serial_mega.inWaiting():
+						reading = serial_mega.readline().decode("utf-8").rstrip()
+						process_serial(reading)
+
+				except Exception as e:
+					# ~ print(e)
+					pass
+				if config["CEMITERIO"] == "VIDA":
+					try:
+						global serial_nano
+						if serial_nano.inWaiting():
+							reading = serial_nano.readline().decode("utf-8").rstrip()
+							
+							if reading != "":
+								print("Nano " + reading)
+
+					except:
+						pass
+
+class ServiceExit(Exception):
+	"""
+	Custom exception which is used to trigger the clean exit
+	of all running threads and the main program.
+	"""
+	pass
+
+
+def service_shutdown(signum, frame):
+	print('Caught signal %d' % signum)
+	print("passou")
+	raise ServiceExit
+
+
+def main():
+	global inicio_chuva_petalas
+	global acende_scenario
+	global inicio_pulsa_cruz
+	global fim_pulsa_cruz
+	global inicio_sequencia
+	global inicio_fumaca
+	global apaga_cruz
+	global entrega
+	global cerimonia_normal
+	global videoDuration
+	global intervalo
+	global lastIntervalo
+	# Register the signal handlers
+	signal.signal(signal.SIGTERM, service_shutdown)
+	signal.signal(signal.SIGINT, service_shutdown)
+
+	print('Starting main program')
+
+	# Start the job threads
+	change_video()
+	try:
+		pass
+		time_video = player.position()
+		ler_serial = readSerial()
+		ler_serial.start()
+
+		looping = time.time()
+		lastLooping = time.time()
+		time_cortinas = time.time()
+
+		while True:
+			if mqttLocal.desligar == True:
+				time.sleep(2)
+				os.system("sudo poweroff")
+			if cerimonia_normal:
+				time_video = player.position()
+				if time_video >= inicio_fumaca:
+					inicio_fumaca += 10000
+					serial_mega.write(b'fum,15000\n')
+				if time_video >= inicio_chuva_petalas:
+					inicio_chuva_petalas += 10000
+					print("chuva_petalas")
+					serial_mega.write(b'CHUVAPETALAS,255,60\n')
+					if config["CEMITERIO"] == "KRAUSE":				
+						serial_mega.write(b'LED_ESTEIRA,255\n')
+					#serial_mega.write(b'<0,0,0,0,0,100,0,0,0,100>\n')
+				if time_video >= inicio_sequencia:
+					inicio_sequencia += 10000
+					print(" sequencia")
+					if config["CEMITERIO"] == "KRAUSE":
+						comando_serial = "LED_CABINE,"+config["COR_CABINE"]["EFEITO_1"]+","+config["COR_CABINE"]["EFEITO_2"]+","\
+							+config["COR_CABINE"]["EFEITO_3"]+"\n"
+						serial_mega.write(comando_serial.encode('utf-8'))
+					if config["CEMITERIO"] == "VIDA":
+						serial_mega.write(b'LED_CABINE,128,255,0,255,255,255,0,255,0\n')											
+					# ~ time.sleep(1)
+					serial_mega.write(b'sequencia\n')					
+				if time_video >= inicio_pulsa_cruz:
+					inicio_pulsa_cruz += 10000
+					print("pulsa cruz")
+					serial_mega.write(b'EN_RGB_GERAL,1\n')# habilita o loop pulsante vermelho
+					time.sleep(.5)
+					serial_mega.write(b'(255,0,0,255,0,0,0,0,0)\n')
+					#serial_mega.write(b'[100,0,0,100,0,0,5,0,0,5,0,0]\n')
+					time.sleep(1)
+				if time_video >= fim_pulsa_cruz:
+					fim_pulsa_cruz += 10000
+					print(" desabilita pulsa cruz")
+					serial_mega.write(b'EN_RGB_GERAL,0\n')
+					# ~ time.sleep(1)
+					if config["CEMITERIO"] == "VIDA":
+						#mantem apenas a cruz vermelha
+						serial_mega.write( b'(0,0,0,255,0,0,0,0,0)\n')
+					else:
+						serial_mega.write( b'(0,0,0,0,0,0,0,0,0)\n')
+				if config["CEMITERIO"] == "VIDA":
+					if  time_video  >= apaga_cruz:
+						apaga_cruz += 10000
+						serial_mega.write( b'(0,0,0,0,0,0,0,0,0)\n')
+
+				if time_video >= acende_scenario and time_video <= acende_scenario + 1:
+					print(" fim de cerimonia")
+					serial_mega.write(b'T_DIM,100\n')
+					# ~ serial_mega.write(b'<100,100,100,100,100,100,100,100,100,100>\n')#luz no fim da cerimonia
+					time.sleep(1)
+					if config["CEMITERIO"] == "KRAUSE":
+						serial_mega.write(b'T_DIM,1\n')
+						serial_mega.write(b'LED_PAREDE,255,255,255\n')#SANCA
+						serial_data = "CORT_all_1\n"
+						serial_mega.write(serial_data.encode("utf-8"))
+
+					if config["CEMITERIO"] == "VIDA":#ligar os balizadores da rampa
+						serial_mega.write(b'(255,255,255,255,255,255,0,0,0)\n')
+						serial_mega.write(b'GPIO,42,1\n')
+					iluminacao_manual = Liga_manual()
+					iluminacao_manual.start()					
+				print(time_video, end='\r')
+			if entrega:
+				time_video = player.position()
+				if time_video >= inicio_fumaca:
+					inicio_fumaca += 10000
+					serial_mega.write(b'fum,15000\n')
+				if time_video >= inicio_sequencia:
+					inicio_sequencia += 10000
+					print(" sequencia")
+					serial_mega.write(b'LED_CABINE,128,255,0,255,255,255,0,255,0\n')
+					serial_mega.write(b'ENTREGA\n')
+					serial_mega.write(b'LED_URNA,255\n')
+				if time_video >= inicio_pulsa_cruz:
+					inicio_pulsa_cruz += 10000
+					print("pulsa cruz")
+					serial_mega.write(b'EN_RGB_GERAL,1\n')# habilita o loop pulsante vermelho
+					time.sleep(.5)
+					serial_mega.write(b'(255,0,0,255,0,0,0,0,0)\n')
+					#serial_mega.write(b'[100,0,0,100,0,0,5,0,0,5,0,0]\n')
+					time.sleep(1)
+				if time_video >= fim_pulsa_cruz:
+					fim_pulsa_cruz += 10000
+					print(" desabilita pulsa cruz")
+					serial_mega.write(b'EN_RGB_GERAL,0\n')
+					# ~ time.sleep(1)
+					if config["CEMITERIO"] == "VIDA":
+						#mantem apenas a cruz vermelha
+						serial_mega.write( b'(0,0,0,255,0,0,0,0,0)\n')
+					else:
+						serial_mega.write( b'(0,0,0,0,0,0,0,0,0)\n')
+				if config["CEMITERIO"] == "VIDA":
+					if  time_video  >= apaga_cruz:
+						apaga_cruz += 10000
+						serial_mega.write( b'(0,0,0,0,0,0,0,0,0)\n')
+				if time_video >= acende_scenario and time_video <= acende_scenario + 1:
+					print(" fim de cerimonia")
+					serial_mega.write(b'T_DIM,100\n')
+					# ~ serial_mega.write(b'<100,100,100,100,100,100,100,100,100,100>\n')#luz no fim da cerimonia
+					time.sleep(1)
+					if config["CEMITERIO"] == "KRAUSE":
+						serial_mega.write(b'T_DIM,1\n')
+						serial_mega.write(b'LED_PAREDE,255,255,255\n')#SANCA
+					if config["CEMITERIO"] == "VIDA":#ligar os balizadores da rampa
+						serial_mega.write(b'(255,255,255,255,255,255,0,0,0)\n')
+						serial_mega.write(b'GPIO,42,1\n')
+						serial_mega.write(b'LED_URNA,0\n')
+					iluminacao_manual = Liga_manual()
+					iluminacao_manual.start()					
+				print(time_video, end = '\r')
+			if player.can_control() and time_video > videoDuration - 2 and player.playback_status() != "Paused":
+				while player.playback_status() != "Paused":
+					print("pausando video")
+					player.pause()
+				entrega = False
+				time_video = 0
+				cerimonia_normal = False
+				serial_mega.write(b'FINAL_CERIMONIA\n')
+	except ServiceExit:
+		pass
+		# Terminate the running threads.
+		# Set the shutdown flag on each thread to trigger a clean shutdown of each thread.
+##        j1.shutdown_flag.set()
+
+		# Wait for the threads to close...
+##        j1.join()
+	print('Exiting main program')
+try:
+	os.system("sudo killall omxplayer.bin")
+except:
+	pass
+
+logging.basicConfig(level=logging.INFO)
+
+change_video()
+
+serial_mega = None
+serial_nano = None
+def reset_timers():
+	global inicio_chuva_petalas
+	global acende_scenario
+	global inicio_pulsa_cruz
+	global fim_pulsa_cruz
+	global inicio_sequencia
+	global inicio_fumaca
+	global apaga_cruz
+	global entrega
+	global cerimonia_normal	
+	inicio_chuva_petalas = 218
+	acende_scenario = 365
+	inicio_pulsa_cruz = 339
+	fim_pulsa_cruz = 352
+	inicio_sequencia = inicio_chuva_petalas - 5
+	inicio_fumaca = inicio_chuva_petalas - 5 - 5
+	apaga_cruz = fim_pulsa_cruz + 8
+
+def config_serial():
+	global serial_mega
+	global serial_nano
+	print("function")
+	lista_porta=[]
+	portas_abertas=[]
+	ports = serial.tools.list_ports.comports()
+
+	for port, desc, hwid in sorted(ports):
+			if "USB" in port:
+				lista_porta.append(port)
+
+	for portas in lista_porta:
+		'''
+		Abre todas as portas
+		'''
+		try:
+			portas_abertas.append(serial.Serial(portas, 9600, timeout=1))
+		except:
+			print(portas, "Acesso negado")
+	
+	try:
+		timeout = time.time() + 20
+		if config["CEMITERIO"] == "VIDA":
+			
+			while serial_mega == None or serial_nano == None and timeout < time.time():
+				for channel in portas_abertas:
+					if channel != serial_mega and channel != serial_nano:
+						channel.write(b'MODEL\n')
+						time.sleep(.2)
+						string = channel.readline().decode("utf-8", "ignore")
+						if serial_nano == None:
+							if "NANO" in string:
+								#print("Porta NANO", lista_porta[portas_abertas.index(channel)])
+								serial_nano = channel
+						if serial_mega == None:
+							if "MEGA" in string:
+								#print("Porta MEGA", lista_porta[portas_abertas.index(channel)])
+								serial_mega = channel
+								if config["CEMITERIO"] == "KRAUSE":
+									serial_mega.write(b'T_DIM,1\n')
+			print("Porta serial MEGA = {}\nPorta serial NANO = {}".format(lista_porta[portas_abertas.index(serial_mega)], lista_porta[portas_abertas.index(serial_nano)]))
+			# ~ mqttServer.serial_nano = serial_nano
+			# ~ mqttServer.serial_mega = serial_mega
+			mqttLocal.serial_nano = serial_nano
+			mqttLocal.serial_mega = serial_mega
+		else:
+			while serial_mega == None and timeout < time.time():
+				for channel in portas_abertas:
+					channel.write(b'MODEL\n')
+					time.sleep(.2)
+					string = channel.readline().decode("utf-8", "ignore")
+					if serial_mega == None:
+						if "MEGA" in string:
+							#print("Porta MEGA", lista_porta[portas_abertas.index(channel)])
+							serial_mega = channel
+			print("Porta serial MEGA = {}".format(lista_porta[portas_abertas.index(serial_mega)]))
+			# ~ mqttServer.serial_nano = serial_nano
+			# ~ mqttServer.serial_mega = serial_mega
+			#mqttLocal.serial_nano = serial_nano
+			mqttLocal.serial_mega = serial_mega			
+
+	except Exception as e:
+		print(e)
+		print("Porta Serial não aberta")
+
+thread = threading.Thread(target=config_serial)
+thread.start()
+mqttLocal = Mosquitto(config['TOPICO_IN_SERVER'],config['PORTA_MQTT'])
+mqttLocal.player = player
+mqttLocal.updateVideo = change_video
+# ~ mqttServer = MosquittoServer(config['TOPICO_EXT_SERVER'])
+# ~ mqttServer.player = player
+if __name__ == '__main__':
+	main()
